@@ -1,9 +1,8 @@
-"""Cache persistente de capas musicais por file_id do Telegram.
+"""Cache persistente de capas musicais por ``file_id`` do Telegram.
 
-Fase 3: centraliza o reaproveitamento de capas para comando normal, inline e
-WebApp. O banco indexa por faixa/URL/hash; o canal técnico serve só para obter
-um file_id reutilizável. Falha de cache nunca bloqueia a entrega: o caller deve
-usar a URL original quando necessário.
+O banco indexa por faixa, URL e hash; o canal técnico serve somente para obter
+um identificador reutilizável. Uma falha de cache nunca bloqueia a entrega: o
+chamador continua com a URL ou os bytes originais.
 """
 from __future__ import annotations
 
@@ -21,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config.settings import COVER_CACHE_CHANNEL_ID, COVER_CACHE_ENABLED
 from app.db.database import SessionLocal
 from app.models.cover_file import CoverFile
+from app.security.media import validate_media_url
 from app.utils.datetime import utcnow_naive as _utcnow_naive
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,11 @@ def _clean_track_id(track_id: str | None) -> str | None:
 
 def _clean_cover_url(cover_url: str | None) -> str | None:
     value = str(cover_url or "").strip()
-    return value or None
+    if not value:
+        return None
+    if "://" in value:
+        return validate_media_url(value, kind="cover")
+    return value
 
 
 def _hash_cover_value(cover: str | bytes | None) -> str | None:
@@ -231,7 +235,7 @@ class CoverCacheService:
             return None
 
         # Só confia em file_id direto quando não há identidade de capa para
-        # validar. No /tnow sempre há track_id/cover_url; baixar um file_id
+        # validar. Nos cards sempre há track_id/cover_url; baixar um file_id
         # antigo antes de verificar a chave foi a causa plausível de capa errada.
         if file_id and not (track_id or cover_url):
             data = await self.download_file_id_bytes(bot, file_id)
@@ -255,6 +259,8 @@ class CoverCacheService:
         available to the caller.
         """
         original: str | bytes | None = photo if photo is not None else _clean_cover_url(cover_url)
+        if isinstance(original, str) and "://" in original:
+            original = validate_media_url(original, kind="cover")
         if not original:
             return None
         cache_key, clean_url, _cover_hash = self._key_for(track_id=track_id, cover_url=cover_url, photo=original)

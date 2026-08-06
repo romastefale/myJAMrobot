@@ -1,80 +1,87 @@
-"""Busca de faixas por termo livre (multi-resultado) via API pública do Deezer.
-
-Serviço reutilizável: usado pelo comando `/radiofm` (lista de candidatos em
-botões) e pelo inline público (resultados com miniatura). O Deezer não exige
-auth e já é usado no projeto para capas (`app/services/lastfm.py`).
-
-Sem contadores de play/like e sem registro de reações — só metadados da faixa
-(título, artista, capa grande/miniatura e link).
-"""
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from dataclasses import dataclass
 
 import httpx
 
+from app.security.media import sanitize_search_term, validate_media_url
+
 logger = logging.getLogger(__name__)
+_SEARCH_URL = "https://api.deezer.com/search"
+_MAX_JSON_BYTES = 512 * 1024
+_SEARCH_SLOTS = asyncio.Semaphore(8)
 
-_DEEZER_SEARCH_URL = "https://api.deezer.com/search"
-_TIMEOUT_SECONDS = 8.0
 
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TrackHit:
     track_id: str
     title: str
     artist: str
-    cover_big: str | None
+    cover_large: str | None
     cover_thumb: str | None
     url: str | None
 
+    @property
+    def cover_big(self) -> str | None:
+        return self.cover_large
+
 
 async def search_tracks(term: str, *, limit: int = 8) -> list[TrackHit]:
-    """Retorna até `limit` faixas pro termo. Nunca levanta: erro/sem match -> []."""
-    q = (term or "").strip()
-    if not q:
+    query = sanitize_search_term(term)
+    limit = min(8, max(1, int(limit)))
+    if not query:
         return []
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            resp = await client.get(_DEEZER_SEARCH_URL, params={"q": q, "limit": str(limit)})
-            if resp.status_code != 200:
-                logger.info("TRACK_SEARCH_NON200 status=%s term=%s", resp.status_code, q)
-                return []
-            data = resp.json()
+        async with _SEARCH_SLOTS:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
+                async with client.stream("GET", _SEARCH_URL, params={"q": query, "limit": str(limit)}) as response:
+                    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                    if response.status_code != 200 or content_type != "application/json":
+                        return []
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > _MAX_JSON_BYTES:
+                            return []
+                        chunks.append(chunk)
+        payload = json.loads(b"".join(chunks))
     except Exception:
-        logger.info("TRACK_SEARCH_FAILED term=%s", q, exc_info=True)
+        logger.info("RADIO_SEARCH_FAILED")
         return []
-
-    items = data.get("data") if isinstance(data, dict) else None
+    items = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         return []
-
     hits: list[TrackHit] = []
     seen: set[str] = set()
     for item in items:
         if not isinstance(item, dict):
             continue
-        title = str(item.get("title") or "").strip()
-        artist = str((item.get("artist") or {}).get("name") or "").strip()
+        title = str(item.get("title") or "").strip()[:300]
+        artist = str((item.get("artist") or {}).get("name") or "").strip()[:300]
         if not title or not artist:
             continue
-        dedup = f"{title.lower()}|{artist.lower()}"
-        if dedup in seen:
+        key = f"{title.casefold()}\0{artist.casefold()}"
+        if key in seen:
             continue
-        seen.add(dedup)
-        album = item.get("album") or {}
-        cover_big = album.get("cover_big") or album.get("cover_medium")
-        cover_thumb = album.get("cover_small") or album.get("cover_medium")
-        url = item.get("link")
+        seen.add(key)
+        album = item.get("album") if isinstance(item.get("album"), dict) else {}
+        large = validate_media_url(album.get("cover_xl") or album.get("cover_big"), kind="cover")
+        thumb = validate_media_url(album.get("cover_medium") or album.get("cover_small"), kind="cover")
+        url = str(item.get("link") or "").strip()
+        if not url.startswith("https://www.deezer.com/"):
+            url = None
         hits.append(
             TrackHit(
-                track_id=str(item.get("id") or "").strip(),
+                track_id=str(item.get("id") or "").strip()[:32],
                 title=title,
                 artist=artist,
-                cover_big=str(cover_big) if cover_big else None,
-                cover_thumb=str(cover_thumb) if cover_thumb else None,
-                url=str(url) if url else None,
+                cover_large=large,
+                cover_thumb=thumb,
+                url=url,
             )
         )
         if len(hits) >= limit:

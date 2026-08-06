@@ -1,12 +1,12 @@
-"""Canvas bruto compartilhado entre /tcanvas e /tstory.
+"""Canvas bruto compartilhado entre /canvas e /story.
 
-/tcanvas otimiza entrega por file_id. /tstory precisa dos BYTES do Canvas para
+/canvas otimiza entrega por file_id. /story precisa dos bytes do Canvas para
 compor o vídeo final com overlay. Este módulo reaproveita a mesma tabela
 canvas_files e o mesmo canal de cache, baixando o file_id já conhecido pelo
 Telegram antes de voltar ao CDN/Spotify Canvas.
 
 Camadas, em ordem:
-1. cache local em DATA_DIR/canvas_bytes (mais rápido para /tstory);
+1. cache local em DATA_DIR/canvas_bytes (mais rápido para /story);
 2. canvas_files -> Telegram get_file/download_file (sem Spotify/CDN externo);
 3. Spotify Canvas/CDN -> grava cache local -> arquiva no canal -> grava file_id.
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import html
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 CANVAS_BYTES_DIR = Path(DATA_DIR) / "canvas_bytes"
 _CANVAS_MIN_BYTES = 256
+_SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
+
+
+def _looks_like_mp4(data: bytes) -> bool:
+    return len(data) >= 12 and data[4:8] == b"ftyp"
 
 
 def _safe_cache_path(track_id: str) -> Path:
@@ -49,6 +55,10 @@ def _read_local_canvas(track_id: str, log_prefix: str) -> bytes | None:
             logger.warning("%s_LOCAL_CANVAS_INVALID track_id=%s size=%s", log_prefix, track_id, size)
             return None
         data = path.read_bytes()
+        if not _looks_like_mp4(data):
+            path.unlink(missing_ok=True)
+            logger.warning("%s_LOCAL_CANVAS_INVALID track_id=%s reason=container", log_prefix, track_id)
+            return None
         logger.info("%s_LOCAL_CANVAS_HIT track_id=%s bytes=%s", log_prefix, track_id, len(data))
         return data
     except Exception:
@@ -57,7 +67,7 @@ def _read_local_canvas(track_id: str, log_prefix: str) -> bytes | None:
 
 
 def _write_local_canvas(track_id: str, data: bytes, log_prefix: str) -> None:
-    if len(data) < _CANVAS_MIN_BYTES or len(data) > CANVAS_DOWNLOAD_MAX_BYTES:
+    if len(data) < _CANVAS_MIN_BYTES or len(data) > CANVAS_DOWNLOAD_MAX_BYTES or not _looks_like_mp4(data):
         logger.warning("%s_LOCAL_CANVAS_WRITE_SKIPPED track_id=%s bytes=%s", log_prefix, track_id, len(data))
         return
     try:
@@ -92,7 +102,10 @@ def _archive_caption(track: dict[str, Any], canvas_track_id: str) -> str:
 async def resolve_canvas_track_id(track: dict[str, Any], track_id: str, log_prefix: str = "CANVAS_ASSET") -> str:
     """Resolve lfm:<hash> para track_id Spotify base62, sem mudar a chave histórica."""
     tid = (track_id or "").strip()
-    if not tid.startswith("lfm:"):
+    preferred = str(track.get("spotify_track_id") or "").strip()
+    if _SPOTIFY_ID_RE.fullmatch(preferred):
+        return preferred
+    if _SPOTIFY_ID_RE.fullmatch(tid):
         return tid
     artist = str(track.get("artist") or "").strip()
     track_name = str(track.get("track_name") or "").strip()
@@ -102,15 +115,13 @@ async def resolve_canvas_track_id(track: dict[str, Any], track_id: str, log_pref
         match = await spotify_service.search_track(artist, track_name)
         if match and match.get("id"):
             resolved = str(match["id"])
-            logger.info(
-                "%s_RESOLVED lfm=%s -> spotify=%s artist=%s track=%s",
-                log_prefix, tid, resolved, artist, track_name,
-            )
-            return resolved
-        logger.info("%s_RESOLVE_MISS lfm=%s artist=%s track=%s", log_prefix, tid, artist, track_name)
+            if _SPOTIFY_ID_RE.fullmatch(resolved):
+                logger.info("%s_RESOLVED source=%s spotify=%s", log_prefix, tid[:24], resolved)
+                return resolved
+        logger.info("%s_RESOLVE_MISS source=%s", log_prefix, tid[:24])
     except Exception:
-        logger.exception("%s_RESOLVE_ERROR lfm=%s artist=%s track=%s", log_prefix, tid, artist, track_name)
-    return tid
+        logger.warning("%s_RESOLVE_ERROR source=%s", log_prefix, tid[:24])
+    return ""
 
 
 async def _download_telegram_file_id(bot: Any, *, track_id: str, file_id: str, log_prefix: str) -> bytes | None:
@@ -122,7 +133,7 @@ async def _download_telegram_file_id(bot: Any, *, track_id: str, file_id: str, l
             return None
         buf = await bot.download_file(file_path)
         data = buf.read() if hasattr(buf, "read") else bytes(buf)
-        if len(data) < _CANVAS_MIN_BYTES or len(data) > CANVAS_DOWNLOAD_MAX_BYTES:
+        if len(data) < _CANVAS_MIN_BYTES or len(data) > CANVAS_DOWNLOAD_MAX_BYTES or not _looks_like_mp4(data):
             logger.warning("%s_FILEID_BYTES_INVALID track_id=%s bytes=%s", log_prefix, track_id, len(data))
             return None
         logger.info("%s_FILEID_BYTES_HIT track_id=%s bytes=%s", log_prefix, track_id, len(data))
@@ -174,7 +185,7 @@ async def get_canvas_bytes_cached(
     track_id: str,
     log_prefix: str = "CANVAS_ASSET",
 ) -> tuple[str, bytes | None]:
-    """Retorna (canvas_track_id, bytes) para composição do /tstory.
+    """Retorna (canvas_track_id, bytes) para composição do /story.
 
     Usa cache local, depois file_id já arquivado no Telegram, depois CDN/Spotify.
     Nunca levanta exceção para o comando; cache é otimização e o caller mantém

@@ -7,33 +7,29 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.bot.canvas import router as canvas_router
+from app.bot.lyrics import router as lyrics_router
+from app.bot.ops_control import router as onoff_router
+from app.bot.radio import router as radio_router
 from app.bot.setup_commands import command_scope_summary
+from app.bot.story import router as story_router
 from app.bot.telegram import bot_dispatcher
-from app.bot.monthfm import router as monthfm_router
-from app.bot.weekfm import router as weekfm_router
-from app.bot.tnow import router as tnow_router
-from app.bot.tcanvas import router as tcanvas_router
-from app.bot.tstory import router as tstory_router
-from app.bot.tly import router as tly_router
-from app.bot.radiofm import router as radiofm_router
-from app.bot.myself import router as myself_router
-from app.bot.songcharts import router as songcharts_router
-from app.bot.music_groups import ensure_tables, list_groups
 from app.security.rate_limit import check_command_rate_limit, reset_rate_limits
+
+EXPECTED = {"start", "help", "login", "playing", "canvas", "story", "radio", "lyrics", "onoff"}
 
 
 def main() -> None:
     assert bot_dispatcher is not None
-    for router in [monthfm_router, weekfm_router, tnow_router, tcanvas_router, tstory_router, tly_router, radiofm_router, myself_router, songcharts_router]:
+    for router in [canvas_router, story_router, radio_router, lyrics_router, onoff_router]:
         assert router is not None
     scopes = command_scope_summary()
-    assert "playing" in scopes["public"]
-    assert "radio" not in scopes["public"]
+    assert set(scopes["all"]) == EXPECTED
+    assert set(scopes["public"]) == EXPECTED - {"onoff"}
+    assert scopes["owner_only"] == ["onoff"]
     reset_rate_limits()
     assert check_command_rate_limit("playing", 1, 1).allowed
-    ensure_tables()
-    assert isinstance(list_groups(), list)
-    print("music-only smoke ok")
+    print("nine-command smoke ok")
 
 
 if __name__ == "__main__":

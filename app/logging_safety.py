@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Iterable, Mapping, Any
+from typing import Any, Iterable, Mapping
 
 _AUTHORIZATION_RE = re.compile(
-    r"(?i)\b(authorization)\s*[:=]\s*(?:Bearer\s+)?([^&\s\"']+)"
+    r"(?i)\b(authorization)[\"']?\s*[:=]\s*[\"']?(?:(?:Bearer|Basic)\s+)?([^&\s,\"'}]+)"
 )
 _SECRET_QUERY_RE = re.compile(
-    r"(?i)\b(api_key|api_sig|sk|access_token|refresh_token|client_secret|bot_token|token|hash|initData)=([^&\s\"']+)"
+    r"(?i)\b(api_key|api_sig|sk|access_token|refresh_token|client_secret|bot_token|token|hash|initData)"
+    r"[\"']?\s*[:=]\s*[\"']?([^&\s,\"'}]+)"
 )
 _BEARER_RE = re.compile(r"(?i)\b(Bearer)\s+([A-Za-z0-9._~+/=-]{12,})")
 _TELEGRAM_BOT_TOKEN_RE = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b")

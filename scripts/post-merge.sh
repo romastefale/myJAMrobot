@@ -1,7 +1,7 @@
 #!/bin/bash
-set -e
+set -eu
 
 # Post-merge: instala deps Python. Idempotente.
 if [ -f requirements.txt ]; then
-    pip install --quiet --disable-pip-version-check -r requirements.txt
+    python -m pip install --quiet --disable-pip-version-check -r requirements.txt
 fi

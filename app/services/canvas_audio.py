@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
 from aiogram.types import BufferedInputFile
 
 from app.config.settings import (
@@ -21,6 +20,7 @@ from app.config.settings import (
     CANVAS_CACHE_ENABLED,
     DATA_DIR,
 )
+from app.security.media import download_media
 from app.services.canvas_asset import get_canvas_bytes_cached
 from app.services.canvas_cache import is_cacheable_track_id
 from app.services.canvas_processed_cache import canvas_processed_cache_service
@@ -48,6 +48,10 @@ class CanvasAudioAsset:
     file_id: str
     duration_ms: int
     bytes_data: bytes | None = None
+
+
+def _looks_like_mp4(data: bytes) -> bool:
+    return len(data) >= 12 and data[4:8] == b"ftyp"
 
 
 def _extract_file_ids(sent: Any) -> tuple[str | None, str | None]:
@@ -96,6 +100,10 @@ def _read_local_audio(cache_key: str, log_prefix: str) -> bytes | None:
             logger.warning("%s_AUDIO_LOCAL_INVALID cache_key=%s size=%s", log_prefix, cache_key, size)
             return None
         data = path.read_bytes()
+        if not _looks_like_mp4(data):
+            path.unlink(missing_ok=True)
+            logger.warning("%s_AUDIO_LOCAL_INVALID cache_key=%s reason=container", log_prefix, cache_key)
+            return None
         logger.info("%s_AUDIO_LOCAL_HIT cache_key=%s bytes=%s", log_prefix, cache_key, len(data))
         return data
     except Exception:
@@ -104,7 +112,7 @@ def _read_local_audio(cache_key: str, log_prefix: str) -> bytes | None:
 
 
 def _write_local_audio(cache_key: str, data: bytes, log_prefix: str) -> None:
-    if len(data) < _MIN_MEDIA_BYTES or len(data) > _OUTPUT_MAX_BYTES:
+    if len(data) < _MIN_MEDIA_BYTES or len(data) > _OUTPUT_MAX_BYTES or not _looks_like_mp4(data):
         logger.warning("%s_AUDIO_LOCAL_WRITE_SKIPPED cache_key=%s bytes=%s", log_prefix, cache_key, len(data))
         return
     try:
@@ -127,7 +135,7 @@ async def _download_telegram_file_id(bot: Any, *, cache_key: str, file_id: str, 
             return None
         buf = await bot.download_file(file_path)
         data = buf.read() if hasattr(buf, "read") else bytes(buf)
-        if len(data) < _MIN_MEDIA_BYTES or len(data) > _OUTPUT_MAX_BYTES:
+        if len(data) < _MIN_MEDIA_BYTES or len(data) > _OUTPUT_MAX_BYTES or not _looks_like_mp4(data):
             logger.warning("%s_AUDIO_FILEID_BYTES_INVALID cache_key=%s bytes=%s", log_prefix, cache_key, len(data))
             return None
         logger.info("%s_AUDIO_FILEID_BYTES_HIT cache_key=%s bytes=%s", log_prefix, cache_key, len(data))
@@ -172,28 +180,17 @@ async def _ffprobe_duration_seconds(path: str) -> float | None:
 
 
 async def _download_preview(preview_url: str, log_prefix: str) -> bytes | None:
-    try:
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS, follow_redirects=True) as client:
-            async with client.stream("GET", preview_url) as response:
-                if response.status_code != 200:
-                    logger.info("%s_PREVIEW_HTTP_MISS status=%s", log_prefix, response.status_code)
-                    return None
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in response.aiter_bytes():
-                    total += len(chunk)
-                    if total > _PREVIEW_MAX_BYTES:
-                        logger.warning("%s_PREVIEW_OVERSIZE bytes=%s", log_prefix, total)
-                        return None
-                    chunks.append(chunk)
-                data = b"".join(chunks)
-                if len(data) < _MIN_MEDIA_BYTES:
-                    logger.info("%s_PREVIEW_TOO_SMALL bytes=%s", log_prefix, len(data))
-                    return None
-                return data
-    except Exception:
-        logger.warning("%s_PREVIEW_DOWNLOAD_FAILED", log_prefix, exc_info=True)
-        return None
+    media = await download_media(
+        preview_url,
+        kind="preview",
+        max_bytes=_PREVIEW_MAX_BYTES,
+        accepted_types=("audio/mpeg", "audio/mp3", "application/octet-stream"),
+        timeout_seconds=_HTTP_TIMEOUT_SECONDS,
+    )
+    if media and len(media.data) >= _MIN_MEDIA_BYTES:
+        return media.data
+    logger.info("%s_PREVIEW_DOWNLOAD_SKIPPED", log_prefix)
+    return None
 
 
 async def _preview_url_for_track(track: dict[str, Any], canvas_track_id: str, log_prefix: str) -> str | None:
@@ -274,7 +271,7 @@ async def _mux_canvas_with_preview(canvas_bytes: bytes, preview_bytes: bytes, lo
             logger.warning("%s_FFMPEG_FAILED rc=%s err=%s", log_prefix, proc.returncode, tail)
             return None
         data = Path(out_path).read_bytes()
-        if len(data) < _MIN_MEDIA_BYTES or len(data) > _OUTPUT_MAX_BYTES:
+        if len(data) < _MIN_MEDIA_BYTES or len(data) > _OUTPUT_MAX_BYTES or not _looks_like_mp4(data):
             logger.warning("%s_OUTPUT_BYTES_INVALID bytes=%s", log_prefix, len(data))
             return None
         return data, duration_ms, canvas_fingerprint
@@ -333,13 +330,12 @@ async def get_canvas_with_preview_asset(
 ) -> CanvasAudioAsset | None:
     """Retorna Canvas muxado com preview oficial, ou None para acionar Plano B.
 
-    A rotina é atômica: cache hit ou processamento completo com upload no canal
-    e registro na tabela derivada. Qualquer falha devolve None, sem impedir que
-    /tcanvas e /tstory usem o Canvas bruto já validado.
+    O canal de cache é apenas uma otimização. Sem canal (ou se o arquivamento
+    falhar), os bytes processados continuam disponíveis para envio direto.
+    Qualquer falha de processamento devolve None, sem impedir que /canvas e
+    /story usem o Canvas bruto já validado.
     """
     if not CANVAS_AUDIO_PREVIEW_ENABLED:
-        return None
-    if not (CANVAS_CACHE_ENABLED and CANVAS_CACHE_CHANNEL_ID):
         return None
 
     canvas_track_id, canvas_bytes = await get_canvas_bytes_cached(
@@ -376,7 +372,8 @@ async def get_canvas_with_preview_asset(
     duration_ms = int(round(video_duration * 1000))
     cache_key = _audio_cache_key(canvas_track_id, canvas_fingerprint, duration_ms)
 
-    local = _read_local_audio(cache_key, log_prefix) if want_bytes else None
+    need_bytes = want_bytes or not CANVAS_CACHE_CHANNEL_ID
+    local = _read_local_audio(cache_key, log_prefix) if need_bytes and CANVAS_CACHE_ENABLED else None
     cached_file_id = await canvas_processed_cache_service.get_file_id(cache_key)
     if cached_file_id:
         if not want_bytes:
@@ -391,6 +388,8 @@ async def get_canvas_with_preview_asset(
             logger.info("%s_AUDIO_CACHE_HIT_BYTES track_id=%s cache_key=%s", log_prefix, canvas_track_id, cache_key)
             return CanvasAudioAsset(canvas_track_id, cache_key, cached_file_id, duration_ms, data)
         await canvas_processed_cache_service.forget(cache_key)
+    elif local:
+        return CanvasAudioAsset(canvas_track_id, cache_key, "", duration_ms, local)
 
     async with canvas_processed_cache_service.lock(cache_key):
         cached_file_id = await canvas_processed_cache_service.get_file_id(cache_key)
@@ -431,26 +430,25 @@ async def get_canvas_with_preview_asset(
             data=audio_canvas_bytes,
             log_prefix=log_prefix,
         )
-        if not file_id:
-            return None
-        stored = await canvas_processed_cache_service.put(
-            cache_key=cache_key,
-            spotify_track_id=canvas_track_id,
-            canvas_fingerprint=canvas_fingerprint,
-            duration_ms=duration_ms,
-            process_kind=PROCESS_KIND,
-            process_version=PROCESS_VERSION,
-            file_id=file_id,
-            file_unique_id=file_unique_id,
-        )
-        if not stored:
-            logger.warning("%s_AUDIO_CACHE_STORE_FAILED track_id=%s cache_key=%s", log_prefix, canvas_track_id, cache_key)
-            return None
-        _write_local_audio(cache_key, audio_canvas_bytes, log_prefix)
+        if file_id:
+            stored = await canvas_processed_cache_service.put(
+                cache_key=cache_key,
+                spotify_track_id=canvas_track_id,
+                canvas_fingerprint=canvas_fingerprint,
+                duration_ms=duration_ms,
+                process_kind=PROCESS_KIND,
+                process_version=PROCESS_VERSION,
+                file_id=file_id,
+                file_unique_id=file_unique_id,
+            )
+            if not stored:
+                logger.warning("%s_AUDIO_CACHE_STORE_FAILED track_id=%s cache_key=%s", log_prefix, canvas_track_id, cache_key)
+        if CANVAS_CACHE_ENABLED:
+            _write_local_audio(cache_key, audio_canvas_bytes, log_prefix)
         return CanvasAudioAsset(
             canvas_track_id,
             cache_key,
-            file_id,
+            file_id or "",
             duration_ms,
-            audio_canvas_bytes if want_bytes else None,
+            audio_canvas_bytes if want_bytes or not file_id else None,
         )

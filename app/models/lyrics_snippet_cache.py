@@ -2,19 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text
+from sqlalchemy import DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
-from app.utils.datetime import utcnow_naive as _utcnow_naive
+from app.utils.datetime import utcnow_naive
 
 
 class LyricsSnippetCache(Base):
-    """Cache persistente de trechos de letra usados pelo /tly.
-
-    Guarda apenas o trecho/snippet exibido no quote, não a letra completa.
-    Linhas com snippet NULL representam cache negativo de curta duração.
-    """
+    """Only the final short excerpt is persisted; full lyrics are never stored."""
 
     __tablename__ = "lyrics_snippet_cache"
 
@@ -25,9 +21,6 @@ class LyricsSnippetCache(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
-    channel_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
-    channel_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow_naive)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow_naive)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)

@@ -1,96 +1,90 @@
 # myJAMrobot
 
-Bot Telegram com foco apenas musical.
+Bot musical do Telegram com uma superfície pública deliberadamente pequena: nove comandos, conexão por nome de usuário da **LAST FM** e nenhum OAuth de usuário.
 
-## Start command
+## Comandos
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
+| Comando | Função |
+|---|---|
+| `/start` | início |
+| `/help` | ajuda |
+| `/login` | salva somente o nome de usuário da LAST FM |
+| `/playing` | música atual ou última reprodução |
+| `/canvas` | Canvas da música, com fallback para a capa |
+| `/story` | vídeo Canvas com áudio quando disponível; fallback estático 1080×1920 |
+| `/radio` | busca e envia música sem conta vinculada |
+| `/lyrics` | card imediato, busca em segundo plano e edição da mesma mensagem com trecho curto |
+| `/onoff` | liga/desliga o acesso público; exclusivo do proprietário |
 
-## Railway SQLite
+O menu comum mostra oito comandos; o escopo privado do proprietário mostra também `/onoff`. Não existem aliases.
 
-Use volume em `/app/data` e variável:
+## Login
+
+`/login <entrada>` aceita exatamente:
+
+- `username`
+- `@username`
+- `last.fm/username`
+
+A entrada é normalizada e somente `username` é persistido em `lastfm_profiles`. Não há senha, OAuth, callback ou token de usuário. A leitura musical usa o método público [`user.getRecentTracks`](https://www.last.fm/api/show/user.getRecentTracks), que não exige autenticação da conta do usuário; a chave de API pertence apenas à aplicação.
+O nome deve seguir a regra atual da [LAST FM](https://www.last.fm/join): 2–15 caracteres, começar por letra e conter apenas letras, números, `_` ou `-`.
+
+## Capas e mídia
+
+- A maior imagem declarada pelas fontes é escolhida; Deezer XL (quando corresponde à faixa), Spotify e a imagem da LAST FM são comparados.
+- Não há aumento generativo ou fabricação de detalhe. O cache reutiliza `file_id` do Telegram sem trocar a imagem-fonte.
+- Downloads locais aceitam apenas HTTPS e hosts previstos, validam cada redirecionamento, tipo MIME e tamanho máximo.
+- O resolver público de Canvas recebe somente o ID público da faixa Spotify; nunca recebe usuário da LAST FM, token de usuário ou dados do Telegram. Defina `MYJAM_SPOTIFY_CANVAS_ENABLED=false` para desativá-lo.
+- `/story` produz 1080×1920. Tenta Canvas com prévia de áudio, depois Canvas sem áudio, depois card estático e, por fim, a capa original.
+
+## Letras
+
+`/lyrics` envia o card imediatamente com estado de busca. Uma fila limitada mantém referência forte à tarefa; quando a busca termina, o bot edita a mesma mensagem.
+
+O extrator prioriza seção marcada como refrão, depois estrofe repetida e depois linha repetida. Quando não existe evidência suficiente de refrão, o fallback é identificado apenas como “Trecho curto”, sem alegação falsa. O limite absoluto é **10 palavras**. A letra completa existe apenas na memória durante a seleção e nunca é gravada; o banco guarda somente o trecho final ou um cache negativo curto. Veja [LEGAL_NOTES.md](LEGAL_NOTES.md).
+
+## Rich Messages 2026
+
+O projeto usa `aiogram==3.30.0` e `InputRichMessage` para cabeçalhos, tabelas, mídia, citações e rodapés. Se a API rejeitar um Rich Message, há fallback HTML/foto sem interromper o comando.
+
+## Segurança
+
+- webhook autenticado por segredo derivado do token do bot e comparação constante;
+- corpo do webhook limitado a 1 MiB e conteúdo restrito a JSON;
+- sem retenção de updates brutos;
+- rate limit por comando, usuário e chat;
+- limite global para renderizações pesadas e limite separado para buscas de letras;
+- `/onoff` autorizado por allowlist de IDs;
+- logs redigem tokens e não registram letras;
+- OAuth, tokens de usuário, Mini App, inline mode e rotas musicais HTTP foram removidos.
+
+Tabelas históricas já existentes não são apagadas. O runtime cria e usa apenas os perfis da LAST FM e caches de capa, Canvas, Canvas processado, trecho e estado operacional.
+Uma URL de banco que não seja SQLite causa falha explícita de inicialização; o bot nunca troca silenciosamente para um banco vazio.
+
+## Configuração
+
+Copie `MYJAMROBOT_ENV.env` e preencha ao menos:
 
 ```text
+MYJAM_TELEGRAM_BOT_TOKEN=
+MYJAM_BASE_URL=https://SEU-DOMINIO.example
+MYJAM_LASTFM_API_KEY=
+MYJAM_OWNER_IDS=123456789
 MYJAM_DATABASE_URL=sqlite:////app/data/myjamrobot.sqlite3
 ```
 
-## Validação
+As credenciais Spotify são opcionais e somente de aplicação; enriquecem metadados, capa e prévia, mas nunca autenticam o usuário.
+Se usar canais de cache, mantenha-os privados, controlados pelo operador e compatíveis com os direitos de armazenamento/reenvio do conteúdo.
+
+## Execução e validação
 
 ```bash
-python -m compileall app scripts tests
-PYTHONPATH=. python scripts/smoke_imports.py
-PYTHONPATH=. pytest -q
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium  # necessário fora da imagem Docker
+python -m app.bootstrap
+python -m compileall -q app tests
+python scripts/validate_release.py
+pytest -q
 ```
 
-
-<!-- MYJAMROBOT_DATABASE_RAILWAY_NOTE -->
-## Railway / SQLite
-
-myJAMrobot is SQLite-only. For Railway, use a persistent volume mounted at `/app/data`.
-Set `MYJAM_DATABASE_URL=sqlite:////app/data/app.db` when possible. If an older Postgres `DATABASE_URL` remains from a previous service, myJAMrobot ignores it unless it is already a SQLite URL.
-
-
-## Escopo limpo
-
-Esta base contém somente recursos musicais do myJAMrobot.
-A escolha de grupo existe apenas para publicar resultado musical onde o usuário e o bot estão presentes.
-
-
-## Songcharts universal
-
-Todos os usuários importados em `lastfm_profiles` entram automaticamente no ranking universal. O mosaico `/tnow` usa a união de `spotify_tokens` e `lastfm_profiles`.
-
-## Controles owner-only adicionados
-
-- `/onoff` alterna o modo silencioso. Use `/onoff on`, `/onoff off` ou `/onoff status`. Quando ativo, usuários comuns só recebem `/start` e `/help`; mensagens, callbacks, inline queries e Web App autenticado ficam bloqueados. O owner definido em `MYJAM_CODE_OWNER_IDS` não é afetado.
-- `/legacy` controla a restrição de logins antigos. Use `/legacy on`, `/legacy off`, `/legacy refresh` ou `/legacy release user_id`. O corte é `2026-06-15 00:00:00 UTC`. Usuários bloqueados podem sair da restrição reconectando com `/lastfm username` ou `/login`.
-- `/listening` envia na DM do owner um `.txt` com os valores completos das tabelas de login e um `.pdf` textual organizado com os mesmos dados.
-
-Observação técnica: `lastfm_profiles` já tinha `created_at/updated_at`. Em `spotify_tokens`, esta etapa adiciona `created_at/updated_at`; para linhas antigas sem esses campos, o boot aproxima o instante original por `expiration - 1 hora`, porque o banco anterior não guardava a data real de criação do login Spotify.
-
-## Importação CSV Last.fm owner-only
-
-Comando disponível somente na DM do owner:
-
-```text
-/lfmimportcsv
-/lfmimportcsv confirm
-/lfmimportcsv confirm limit=500
-```
-
-Envie um `.csv` anexado com legenda `/lfmimportcsv` para prévia. Para aplicar, use `confirm`. O bot envia por etapas, respeitando `MYJAM_LASTFM_SCROBBLE_IMPORT_BATCH_SIZE` (máximo técnico: 50 por chamada da API), pausa entre chamadas e pausa entre etapas. Se houver falhas, limite diário, HTTP 429 ou erro 29/rate limit do Last.fm, o bot para a execução, relata a etapa e gera CSV de retry/continuação.
-
-Formato aceito:
-
-```csv
-artist,track,album,inject_count
-Muse,The 2nd Law: Isolated System,,319
-Home,Resonance,,313
-```
-
-Também aceita `artista,musica,reproducoes` e CSV expandido com uma linha por scrobble.
-
-Variáveis relevantes no Railway:
-
-```text
-MYJAM_LASTFM_API_KEY=              # pode ser a mesma chave já usada para leitura Last.fm
-MYJAM_LASTFM_API_SECRET=           # obrigatório para assinar track.scrobble
-MYJAM_LASTFM_SESSION_KEY=          # sessão da conta Last.fm que receberá os scrobbles
-MYJAM_LASTFM_SCROBBLE_IMPORT_MAX_PER_JOB=2000
-MYJAM_LASTFM_SCROBBLE_IMPORT_STAGE_SIZE=250
-MYJAM_LASTFM_SCROBBLE_IMPORT_BATCH_SIZE=50
-MYJAM_LASTFM_SCROBBLE_IMPORT_SLEEP_SECONDS=1.2
-MYJAM_LASTFM_SCROBBLE_IMPORT_STAGE_SLEEP_SECONDS=10
-MYJAM_LASTFM_SCROBBLE_IMPORT_STOP_ON_DAILY_LIMIT=true
-MYJAM_LASTFM_SCROBBLE_IMPORT_SEND_RETRY_CSV=true
-MYJAM_LASTFM_SCROBBLE_IMPORT_SEND_REMAINING_CSV=true
-```
-
-Não use `MYJAM_SPOTIFY_CLIENT_ID` nem `MYJAM_SPOTIFY_CLIENT_SECRET` para Last.fm. O código reaproveita apenas o padrão de configuração e o timeout HTTP global; a escrita no Last.fm precisa de credenciais Last.fm próprias.
-
-
-## Variáveis antigas
-
-O código ainda aceita os nomes `TR3_*`, `TR4_*` e nomes sem prefixo como compatibilidade com deployments antigos no Railway. Para repositório novo, prefira `MYJAM_*`.
+No Railway, monte um volume persistente em `/app/data`.

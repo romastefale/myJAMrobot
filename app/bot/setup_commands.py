@@ -23,97 +23,51 @@ class CommandDef:
     description: str
 
 
-_PRIVATE_COMMANDS: tuple[CommandDef, ...] = (
-    CommandDef("start", "Boas-vindas e conexão"),
-    CommandDef("help", "Comandos disponíveis"),
-    CommandDef("lastfm", "Conectar ou ver Last.fm"),
-    CommandDef("lastfmoff", "Desconectar Last.fm"),
-    CommandDef("login", "Conectar Spotify"),
-    CommandDef("logout", "Desconectar Spotify"),
-    CommandDef("playing", "Sua música tocando agora"),
-    CommandDef("albnow", "Álbum da música atual"),
-    CommandDef("tcanvas", "Canvas Spotify da música atual"),
-    CommandDef("tstory", "Story da música atual"),
-    CommandDef("tly", "Trecho de letra da música atual"),
-    CommandDef("radiofm", "Buscar uma música"),
-    CommandDef("nowp", "Enviar sua música para grupo"),
-    CommandDef("myself", "Menu de extratos pessoais"),
-    CommandDef("weekfm", "Extrato semanal Last.fm"),
-    CommandDef("monthfm", "Extrato mensal Last.fm"),
+_PUBLIC_COMMANDS: tuple[CommandDef, ...] = (
+    CommandDef("start", "Início"),
+    CommandDef("help", "Ajuda"),
+    CommandDef("login", "Informar usuário da LAST FM"),
+    CommandDef("playing", "Música atual"),
+    CommandDef("canvas", "Canvas da música atual"),
+    CommandDef("story", "Story vertical 9:16"),
+    CommandDef("radio", "Buscar e enviar uma música"),
+    CommandDef("lyrics", "Música com trecho de refrão"),
 )
-
-_GROUP_COMMANDS: tuple[CommandDef, ...] = (
-    CommandDef("help", "Comandos musicais do grupo"),
-    CommandDef("lastfm", "Conectar ou ver Last.fm"),
-    CommandDef("lastfmoff", "Desconectar Last.fm"),
-    CommandDef("playing", "Sua música no grupo"),
-    CommandDef("albnow", "Álbum da música atual"),
-    CommandDef("tcanvas", "Canvas Spotify da música atual"),
-    CommandDef("tstory", "Story da música atual"),
-    CommandDef("tly", "Trecho de letra da música atual"),
-    CommandDef("radiofm", "Buscar uma música no grupo"),
-    CommandDef("tnow", "Mosaico de ouvintes do grupo"),
-    CommandDef("myself", "Menu de extratos pessoais"),
-    CommandDef("weekfm", "Extrato semanal Last.fm"),
-    CommandDef("monthfm", "Extrato mensal Last.fm"),
-    CommandDef("songcharts", "Ranking musical do grupo"),
-)
-
-_OWNER_ONLY_COMMANDS: tuple[CommandDef, ...] = (
-    CommandDef("tnowall", "Mosaico consolidado por DM"),
-    CommandDef("songchartsall", "Ranking consolidado por DM"),
-    CommandDef("weekall", "Ranking semanal consolidado"),
-    CommandDef("monthall", "Ranking mensal consolidado"),
-    CommandDef("tmn", "Cadastrar usuário Last.fm manualmente"),
-    CommandDef("tpv", "Privacidade visual no mosaico"),
-    CommandDef("onoff", "Silenciar usuários comuns"),
-    CommandDef("legacy", "Restringir logins antigos"),
-    CommandDef("listening", "Exportar banco completo"),
-)
-
-_OWNER_PRIVATE_COMMANDS: tuple[CommandDef, ...] = _PRIVATE_COMMANDS + _OWNER_ONLY_COMMANDS
-
-# Compatibilidade com testes e scripts antigos: "public" representa os comandos
-# comuns de DM. Os escopos reais são private, group e owner_private.
-_PUBLIC_COMMANDS = _PRIVATE_COMMANDS
+_OWNER_ONLY_COMMANDS: tuple[CommandDef, ...] = (CommandDef("onoff", "Ligar ou desligar o acesso público"),)
+_ALL_COMMANDS = _PUBLIC_COMMANDS + _OWNER_ONLY_COMMANDS
 
 
-def _to_bot_commands(commands: tuple[CommandDef, ...]) -> list[BotCommand]:
-    return [BotCommand(command=item.command, description=item.description[:256]) for item in commands]
+def _telegram_commands(items: tuple[CommandDef, ...]) -> list[BotCommand]:
+    return [BotCommand(command=item.command, description=item.description) for item in items]
 
 
 def command_scope_summary() -> dict[str, object]:
     return {
+        "all": [item.command for item in _ALL_COMMANDS],
         "public": [item.command for item in _PUBLIC_COMMANDS],
-        "private": [item.command for item in _PRIVATE_COMMANDS],
-        "group": [item.command for item in _GROUP_COMMANDS],
-        "owner_private": [item.command for item in _OWNER_PRIVATE_COMMANDS],
         "owner_only": [item.command for item in _OWNER_ONLY_COMMANDS],
     }
 
 
 async def setup_bot_commands(bot: Bot) -> None:
-    private_commands = _to_bot_commands(_PRIVATE_COMMANDS)
-    group_commands = _to_bot_commands(_GROUP_COMMANDS)
-    owner_commands = _to_bot_commands(_OWNER_PRIVATE_COMMANDS)
-    try:
-        await bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())
-        await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
-        await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
-        logger.info(
-            "BOT_COMMANDS_MUSIC_ONLY_SET | private=%s group=%s owner_ids=%s",
-            len(private_commands),
-            len(group_commands),
-            len(CODE_OWNER_IDS),
-        )
-    except Exception:
-        logger.warning("BOT_COMMANDS_MUSIC_ONLY_FAILED", exc_info=True)
-        return
-
-    for owner_id in CODE_OWNER_IDS:
+    public = _telegram_commands(_PUBLIC_COMMANDS)
+    owner = _telegram_commands(_ALL_COMMANDS)
+    failures: list[str] = []
+    scopes = (BotCommandScopeDefault(), BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats())
+    for scope in scopes:
         try:
-            await bot.set_my_commands(owner_commands, scope=BotCommandScopeChat(chat_id=owner_id))
+            await bot.delete_my_commands(scope=scope)
+            await bot.set_my_commands(public, scope=scope)
         except Exception:
-            logger.warning("BOT_OWNER_COMMANDS_SET_FAILED", exc_info=True)
-        else:
-            logger.info("BOT_OWNER_COMMANDS_SET | count=%s", len(owner_commands))
+            logger.warning("BOT_COMMAND_SCOPE_UPDATE_FAILED scope=%s", type(scope).__name__)
+            failures.append(type(scope).__name__)
+    for owner_id in CODE_OWNER_IDS:
+        scope = BotCommandScopeChat(chat_id=owner_id)
+        try:
+            await bot.delete_my_commands(scope=scope)
+            await bot.set_my_commands(owner, scope=scope)
+        except Exception:
+            logger.warning("BOT_OWNER_COMMAND_SCOPE_UPDATE_FAILED owner_id=%s", owner_id)
+            failures.append(f"owner:{owner_id}")
+    if failures:
+        raise RuntimeError(f"command scope update failed for {len(failures)} scope(s)")

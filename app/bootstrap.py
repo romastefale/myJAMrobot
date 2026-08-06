@@ -21,7 +21,10 @@ logger = logging.getLogger("myjamrobot.bootstrap")
 def _port_from_env() -> int:
     raw = os.getenv("PORT", "8000").strip() or "8000"
     try:
-        return int(raw)
+        port = int(raw)
+        if not 1 <= port <= 65535:
+            raise ValueError
+        return port
     except ValueError:
         logger.warning("PORT_INVALID value=%r fallback=8000", raw)
         return 8000
@@ -29,6 +32,7 @@ def _port_from_env() -> int:
 
 if __name__ == "__main__":
     port = _port_from_env()
+    trusted_proxies = os.getenv("MYJAM_FORWARDED_ALLOW_IPS", "127.0.0.1").strip() or "127.0.0.1"
     logger.info("BOOTSTRAP_START host=0.0.0.0 port=%s app=app.main:app", port)
     uvicorn.run(
         "app.main:app",
@@ -36,6 +40,6 @@ if __name__ == "__main__":
         port=port,
         reload=False,
         proxy_headers=True,
-        forwarded_allow_ips="*",
+        forwarded_allow_ips=trusted_proxies,
         log_level=os.getenv("UVICORN_LOG_LEVEL", "info").lower(),
     )

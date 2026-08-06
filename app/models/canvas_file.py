@@ -14,7 +14,7 @@ class CanvasFile(Base):
 
     O Telegram guarda cada arquivo enviado e devolve um `file_id` que pode ser
     reenviado pra qualquer chat (pelo mesmo bot) sem re-upload — padrão oficial
-    (Bot FAQ / grammY docs). Assim /tcanvas e /tly param de rebaixar do CDN e
+    (Bot FAQ / grammY docs). Assim /canvas para de rebaixar do CDN e
     re-subir o mesmo vídeo a cada chamada.
 
     - `track_id`: Spotify track_id base62 (NUNCA o "lfm:<hash>" interno).

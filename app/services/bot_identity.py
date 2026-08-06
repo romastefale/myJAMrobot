@@ -1,6 +1,6 @@
 """Identidade do bot (nome + foto de perfil) com cache de TTL.
 
-Usado pelo card do /tstory pra estampar o nome atual do bot e usar a foto
+Usado pelo card do /story para estampar o nome atual do bot e usar a foto
 de perfil dele como ícone. Como o nome/foto mudam raramente, cacheia em
 memória; quando a foto do bot muda, novos cards refletem a foto
 nova assim que o cache expira (TTL).

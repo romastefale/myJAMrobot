@@ -1,10 +1,10 @@
 [project]
 name = "myjamrobot"
-version = "10.1.0"
-description = "Telegram music bot focused on Last.fm, Spotify, cards and public music commands"
+version = "11.0.0"
+description = "Telegram music bot with nine commands and username-only LAST FM connection"
 requires-python = ">=3.11"
 dependencies = [
-    "aiogram==3.27.0",
+    "aiogram==3.30.0",
     "fastapi==0.116.1",
     "httpx==0.28.1",
     "SQLAlchemy==2.0.41",

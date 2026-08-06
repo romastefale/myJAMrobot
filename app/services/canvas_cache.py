@@ -4,7 +4,7 @@ O Telegram guarda cada arquivo enviado e devolve um `file_id` que pode ser
 REENVIADO pra qualquer chat (pelo MESMO bot) sem re-upload — padrão oficial
 documentado (Bot FAQ / grammY docs) e usado por inúmeros projetos de "canal
 como storage". Aqui guardamos `track_id (Spotify) -> file_id` em DB pra que
-/tcanvas e /tstory parem de rebaixar do CDN e re-subir o mesmo vídeo a cada uso.
+/canvas e /story parem de rebaixar do CDN e re-subir o mesmo vídeo a cada uso.
 
 Robustez (file_id PODE mudar com o tempo — não é garantido estável):
 - `file_id` é o que reenvia; se o Telegram rejeitar ("wrong file_id"/400), o
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import weakref
 
 from sqlalchemy.exc import IntegrityError
@@ -30,13 +31,14 @@ from app.models.canvas_file import CanvasFile
 from app.utils.datetime import utcnow_naive as _utcnow_naive
 
 logger = logging.getLogger(__name__)
+_TRACK_ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
 
 
 def is_cacheable_track_id(track_id: str | None) -> bool:
     """Só Spotify track_id base62 é cacheável. NUNCA o "lfm:<hash>" interno
     (chave histórica de likes) nem vazio — esses jamais resolvem Canvas."""
     tid = (track_id or "").strip()
-    return bool(tid) and not tid.startswith("lfm:")
+    return bool(_TRACK_ID_RE.fullmatch(tid))
 
 
 class CanvasCacheService:
