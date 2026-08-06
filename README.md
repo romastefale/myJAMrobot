@@ -14,9 +14,8 @@ Bot musical do Telegram com uma superfície pública deliberadamente pequena: no
 | `/story` | vídeo Canvas com áudio quando disponível; fallback estático 1080×1920 |
 | `/radio` | busca e envia música sem conta vinculada |
 | `/lyrics` | card imediato, busca em segundo plano e edição da mesma mensagem com trecho curto |
-| `/onoff` | liga/desliga o acesso público; exclusivo do proprietário |
 
-O menu comum mostra oito comandos; o escopo privado do proprietário mostra também `/onoff`. Não existem aliases.
+
 
 ## Login
 
@@ -47,44 +46,12 @@ O extrator prioriza seção marcada como refrão, depois estrofe repetida e depo
 
 O projeto usa `aiogram==3.30.0` e `InputRichMessage` para cabeçalhos, tabelas, mídia, citações e rodapés. Se a API rejeitar um Rich Message, há fallback HTML/foto sem interromper o comando.
 
-## Segurança
-
-- webhook autenticado por segredo derivado do token do bot e comparação constante;
-- corpo do webhook limitado a 1 MiB e conteúdo restrito a JSON;
-- sem retenção de updates brutos;
-- rate limit por comando, usuário e chat;
-- limite global para renderizações pesadas e limite separado para buscas de letras;
-- `/onoff` autorizado por allowlist de IDs;
-- logs redigem tokens e não registram letras;
-- OAuth, tokens de usuário, Mini App, inline mode e rotas musicais HTTP foram removidos.
-
-Tabelas históricas já existentes não são apagadas. O runtime cria e usa apenas os perfis da LAST FM e caches de capa, Canvas, Canvas processado, trecho e estado operacional.
-Uma URL de banco que não seja SQLite causa falha explícita de inicialização; o bot nunca troca silenciosamente para um banco vazio.
 
 ## Configuração
 
-Copie `MYJAMROBOT_ENV.env` e preencha ao menos:
 
-```text
-MYJAM_TELEGRAM_BOT_TOKEN=
-MYJAM_BASE_URL=https://SEU-DOMINIO.example
-MYJAM_LASTFM_API_KEY=
-MYJAM_OWNER_IDS=123456789
-MYJAM_DATABASE_URL=sqlite:////app/data/myjamrobot.sqlite3
+```boa sorte
+
 ```
 
-As credenciais Spotify são opcionais e somente de aplicação; enriquecem metadados, capa e prévia, mas nunca autenticam o usuário.
-Se usar canais de cache, mantenha-os privados, controlados pelo operador e compatíveis com os direitos de armazenamento/reenvio do conteúdo.
-
-## Execução e validação
-
-```bash
-python -m pip install -r requirements-dev.txt
-python -m playwright install chromium  # necessário fora da imagem Docker
-python -m app.bootstrap
-python -m compileall -q app tests
-python scripts/validate_release.py
-pytest -q
-```
-
-No Railway, monte um volume persistente em `/app/data`.
+@tigrao
