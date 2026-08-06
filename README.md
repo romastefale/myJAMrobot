@@ -51,6 +51,6 @@ O projeto usa `aiogram==3.30.0` e `InputRichMessage` para cabeçalhos, tabelas, 
 
 
 ```
-        @tigrao
+criador: @tigrao
 
 ```
