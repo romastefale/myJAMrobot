@@ -47,11 +47,10 @@ O extrator prioriza seção marcada como refrão, depois estrofe repetida e depo
 O projeto usa `aiogram==3.30.0` e `InputRichMessage` para cabeçalhos, tabelas, mídia, citações e rodapés. Se a API rejeitar um Rich Message, há fallback HTML/foto sem interromper o comando.
 
 
-## Configuração
+## Boa sorte!
 
-
-```boa sorte
 
 ```
+        @tigrao
 
-@tigrao
+```
