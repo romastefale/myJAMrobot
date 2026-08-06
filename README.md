@@ -1,6 +1,6 @@
 # myJAMrobot
 
-Bot musical do Telegram com uma superfície pública deliberadamente pequena: nove comandos, conexão por nome de usuário da **LAST FM** e nenhum OAuth de usuário.
+Bot musical do Telegram.
 
 ## Comandos
 
