@@ -2,15 +2,20 @@ name: Finalize myJAMrobot 11.0 install
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited]
+  pull_request_target:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   finalize:
-    if: github.event.issue.title == 'FINALIZE_MYJAMROBOT_11_INSTALL'
+    if: >-
+      (github.event_name == 'issues' && github.event.issue.title == 'FINALIZE_MYJAMROBOT_11_INSTALL') ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.title == 'FINALIZE_MYJAMROBOT_11_INSTALL')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,12 +32,16 @@ jobs:
           rm -f .github/workflows/finalize-install.yml
           rmdir .github/workflows 2>/dev/null || true
           rmdir .github 2>/dev/null || true
+          git add -A
           test "$(git write-tree)" = "48880a06c84cc602ad1fd86262b6e800cef29643"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
           git commit -m "Instalar myJAMrobot 11.0 seguro"
           git push origin HEAD:main
-          gh issue close "${{ github.event.issue.number }}" --comment "Instalação concluída na main."
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            gh pr close "${{ github.event.pull_request.number }}" --comment "Instalação concluída na main."
+          else
+            gh issue close "${{ github.event.issue.number }}" --comment "Instalação concluída na main."
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
