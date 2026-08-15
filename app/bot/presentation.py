@@ -126,7 +126,8 @@ def music_caption_html(
     title_part = f'<a href="{track_url}"><b>{title}</b></a>' if track_url else f"<b>{title}</b>"
     lines = [
         _listener_line(user_id=user_id, user_name=user_name, user_username=user_username),
-        f"{title_part} - <i>{artist}</i>",
+        title_part,
+        f"<i>{artist}</i>",
     ]
     if lyric:
         lyric_text = bound_excerpt_text(lyric.text) or ""
@@ -171,17 +172,13 @@ def music_rich_message(
         rich_photo = BufferedInputFile(photo, filename="cover.jpg") if isinstance(photo, bytes) else photo
         blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=rich_photo)))
 
-    # Keep the song line as one native RichText sequence: bold title - italic artist.
     blocks.append(
         InputRichBlockSectionHeading(
-            text=[
-                RichTextBold(text=title_text),
-                " - ",
-                RichTextItalic(text=artist),
-            ],
-            size=1,
+            text=RichTextBold(text=title_text),
+            size=3,
         )
     )
+    blocks.append(InputRichBlockParagraph(text=RichTextItalic(text=artist)))
 
     if lyric:
         lyric_text = bound_excerpt_text(lyric.text) or ""
