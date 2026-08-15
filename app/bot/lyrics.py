@@ -22,6 +22,7 @@ async def _finish_lyrics(
     track: dict,
     user_id: int,
     user_name: str,
+    user_username: str,
 ) -> None:
     artist = str(track.get("artist") or "").strip()
     title = str(track.get("track_name") or "").strip()
@@ -32,6 +33,7 @@ async def _finish_lyrics(
             track=track,
             user_id=user_id,
             user_name=user_name,
+            user_username=user_username,
             lyric=excerpt,
             lyric_status=None if excerpt else "Trecho não localizado.",
         )
@@ -47,13 +49,15 @@ async def lyrics_command(message: Message) -> None:
     if not track:
         return
     user_id = int(message.from_user.id)
-    user_name = message.from_user.full_name or "Usuário"
+    user_name = (message.from_user.full_name or "").strip()
+    user_username = (message.from_user.username or "").strip()
     delivery = await send_music_card(
         message.bot,
         chat_id=message.chat.id,
         track=track,
         user_id=user_id,
         user_name=user_name,
+        user_username=user_username,
         lyric_status="Buscando um trecho curto de refrão…",
     )
     key = f"lyrics:{message.chat.id}:{user_id}"
@@ -64,6 +68,7 @@ async def lyrics_command(message: Message) -> None:
             track=track,
             user_id=user_id,
             user_name=user_name,
+            user_username=user_username,
         ),
     )
     if not accepted:
@@ -73,6 +78,7 @@ async def lyrics_command(message: Message) -> None:
                 track=track,
                 user_id=user_id,
                 user_name=user_name,
+                user_username=user_username,
                 lyric=None,
                 lyric_status="Busca ocupada. Tente novamente em instantes.",
             )
