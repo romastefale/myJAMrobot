@@ -291,3 +291,4 @@ class LyricsService:
 
 
 lyrics_service = LyricsService()
+
