@@ -17,6 +17,8 @@ from aiogram.types import (
     InputRichBlockSectionHeading,
     InputRichMessage,
     Message,
+    RichTextBold,
+    RichTextItalic,
     RichTextMarked,
     RichTextUrl,
 )
@@ -124,8 +126,7 @@ def music_caption_html(
     title_part = f'<a href="{track_url}"><b>{title}</b></a>' if track_url else f"<b>{title}</b>"
     lines = [
         _listener_line(user_id=user_id, user_name=user_name, user_username=user_username),
-        title_part,
-        f"<i>{artist}</i>",
+        f"{title_part} - <i>{artist}</i>",
     ]
     if lyric:
         source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
@@ -176,8 +177,17 @@ def music_rich_message(
         rich_photo = BufferedInputFile(photo, filename="cover.jpg") if isinstance(photo, bytes) else photo
         blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=rich_photo)))
 
-    blocks.append(InputRichBlockSectionHeading(text=title_text, size=1))
-    blocks.append(InputRichBlockSectionHeading(text=artist, size=6))
+    # Keep the song line as one native RichText sequence: bold title - italic artist.
+    blocks.append(
+        InputRichBlockSectionHeading(
+            text=[
+                RichTextBold(text=title_text),
+                " - ",
+                RichTextItalic(text=artist),
+            ],
+            size=1,
+        )
+    )
 
     if lyric:
         source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
@@ -202,8 +212,7 @@ def music_rich_message(
 
     resolved_footer = _footer_text(track, footer)
     if resolved_footer:
-        # Keep plays as Telegram's native footer so the original gray footer
-        # appearance is preserved instead of folding it into a paragraph.
+        # Preserve plays as Telegram's native footer (gray footer appearance).
         blocks.append(InputRichBlockFooter(text=resolved_footer))
 
     return InputRichMessage(blocks=blocks, skip_entity_detection=True)
