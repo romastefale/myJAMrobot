@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _WS_RE = re.compile(r"\s+")
 _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _SNIPPET_WORD_RE = re.compile(r"[^\W_]+(?:[’'-][^\W_]+)*", re.UNICODE)
-_MAX_SNIPPET_WORDS = 10
+_MAX_SNIPPET_WORDS = 35
 
 
 def _bounded_snippet(value: str | None) -> str | None:
