@@ -26,6 +26,7 @@ class PendingResults:
     hits: list[TrackHit]
     user_id: int
     user_name: str
+    user_username: str
     chat_id: int
     created_at: float
 
@@ -58,7 +59,14 @@ def _remember_prompt(chat_id: int, user_id: int) -> None:
     _prompts[key] = time.monotonic()
 
 
-async def _show_results(message: Message, *, term: str, user_id: int, user_name: str) -> None:
+async def _show_results(
+    message: Message,
+    *,
+    term: str,
+    user_id: int,
+    user_name: str,
+    user_username: str,
+) -> None:
     term = sanitize_search_term(term)
     if not term:
         await message.answer("Informe o nome da música ou do artista.")
@@ -72,7 +80,14 @@ async def _show_results(message: Message, *, term: str, user_id: int, user_name:
         oldest = min(_pending, key=lambda key: _pending[key].created_at)
         _pending.pop(oldest, None)
     token = secrets.token_urlsafe(7)
-    _pending[token] = PendingResults(hits, user_id, user_name, int(message.chat.id), time.monotonic())
+    _pending[token] = PendingResults(
+        hits,
+        user_id,
+        user_name,
+        user_username,
+        int(message.chat.id),
+        time.monotonic(),
+    )
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=f"{hit.title} — {hit.artist}"[:64], callback_data=f"radio:{token}:{index}")]
@@ -95,7 +110,8 @@ async def radio_command(message: Message, command: CommandObject) -> None:
         message,
         term=term,
         user_id=int(message.from_user.id),
-        user_name=message.from_user.full_name or "Usuário",
+        user_name=(message.from_user.full_name or "").strip(),
+        user_username=(message.from_user.username or "").strip(),
     )
 
 
@@ -112,7 +128,8 @@ async def radio_prompt_answer(message: Message) -> None:
         message,
         term=message.text or "",
         user_id=int(message.from_user.id),
-        user_name=message.from_user.full_name or "Usuário",
+        user_name=(message.from_user.full_name or "").strip(),
+        user_username=(message.from_user.username or "").strip(),
     )
 
 
@@ -166,5 +183,6 @@ async def radio_pick(query: CallbackQuery) -> None:
         track=track,
         user_id=pending.user_id,
         user_name=pending.user_name,
+        user_username=pending.user_username,
         footer="Rádio independente · sem conta vinculada",
     )
