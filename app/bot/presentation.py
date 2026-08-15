@@ -129,14 +129,8 @@ def music_caption_html(
         f"{title_part} - <i>{artist}</i>",
     ]
     if lyric:
-        source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
         lyric_text = bound_excerpt_text(lyric.text) or ""
-        lines.extend(
-            [
-                f"<blockquote>{html.escape(lyric_text)}</blockquote>",
-                f'{html.escape(lyric.label)} · <a href="{html.escape(lyric.source_url, quote=True)}">{source_name}</a> · até 10 palavras',
-            ]
-        )
+        lines.append(f"<blockquote>{html.escape(lyric_text)}</blockquote>")
     elif lyric_status:
         lines.append(f"<i>{_safe(lyric_status, 120)}</i>")
     resolved_footer = _footer_text(track, footer)
@@ -190,17 +184,10 @@ def music_rich_message(
     )
 
     if lyric:
-        source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
         lyric_text = bound_excerpt_text(lyric.text) or ""
         blocks.append(
             InputRichBlockBlockQuotation(
                 blocks=[InputRichBlockParagraph(text=lyric_text)],
-                credit=_plain(lyric.label, 120),
-            )
-        )
-        blocks.append(
-            InputRichBlockFooter(
-                text=[RichTextUrl(text=source_name, url=lyric.source_url), " · até 10 palavras"]
             )
         )
     elif lyric_status:
