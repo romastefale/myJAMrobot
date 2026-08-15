@@ -35,7 +35,7 @@ async def _finish_lyrics(
             user_name=user_name,
             user_username=user_username,
             lyric=excerpt,
-            lyric_status=None if excerpt else "Trecho não localizado.",
+            lyric_status=None if excerpt else "Letra não localizada.",
         )
     except Exception:
         logger.info("LYRICS_CARD_EDIT_FAILED chat_id=%s", delivery.message.chat.id)
@@ -58,7 +58,7 @@ async def lyrics_command(message: Message) -> None:
         user_id=user_id,
         user_name=user_name,
         user_username=user_username,
-        lyric_status="Buscando um trecho curto de refrão…",
+        lyric_status="Buscando letra…",
     )
     key = f"lyrics:{message.chat.id}:{user_id}"
     accepted = lyrics_task_pool.submit(
