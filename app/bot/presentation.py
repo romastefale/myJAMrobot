@@ -10,9 +10,15 @@ from aiogram import Bot
 from aiogram.types import (
     BufferedInputFile,
     InputMediaPhoto,
+    InputRichBlockBlockQuotation,
+    InputRichBlockFooter,
+    InputRichBlockParagraph,
+    InputRichBlockPhoto,
+    InputRichBlockSectionHeading,
     InputRichMessage,
-    InputRichMessageMedia,
     Message,
+    RichTextMarked,
+    RichTextUrl,
 )
 
 from app.security.media import validate_media_url
@@ -29,11 +35,15 @@ class CardDelivery:
     photo: str | bytes | None
 
 
+def _plain(value: object, maximum: int = 300) -> str:
+    return str(value or "").strip()[:maximum]
+
+
 def _safe(value: object, maximum: int = 300) -> str:
-    return html.escape(str(value or "").strip()[:maximum])
+    return html.escape(_plain(value, maximum))
 
 
-def _safe_url(value: object) -> str | None:
+def _validated_url(value: object) -> str | None:
     raw = str(value or "").strip()
     if not raw or len(raw) > 2048 or any(ord(char) < 32 for char in raw):
         return None
@@ -46,19 +56,36 @@ def _safe_url(value: object) -> str | None:
         return None
     if parsed.hostname not in {"open.spotify.com", "www.last.fm", "www.deezer.com"}:
         return None
-    return html.escape(raw, quote=True)
+    return raw
+
+
+def _safe_url(value: object) -> str | None:
+    raw = _validated_url(value)
+    return html.escape(raw, quote=True) if raw else None
+
+
+def _listener_identity(*, user_name: str, user_username: str | None) -> str | None:
+    display_name = _plain(user_name, 100)
+    username = _plain(str(user_username or "").strip().lstrip("@"), 64)
+    if display_name:
+        return display_name
+    if username:
+        return f"@{username}"
+    return None
 
 
 def _listener_line(*, user_id: int, user_name: str, user_username: str | None) -> str:
-    display_name = _safe(user_name, 100)
-    username = _safe(str(user_username or "").strip().lstrip("@"), 64)
-    if display_name:
-        identity = display_name
-    elif username:
-        identity = f"@{username}"
-    else:
+    identity = _listener_identity(user_name=user_name, user_username=user_username)
+    if not identity:
         return "está ouvindo..."
-    return f'<a href="tg://user?id={int(user_id)}">{identity}</a> está ouvindo...'
+    return f'<a href="tg://user?id={int(user_id)}">{html.escape(identity)}</a> está ouvindo...'
+
+
+def _listener_rich_text(*, user_id: int, user_name: str, user_username: str | None) -> Any:
+    identity = _listener_identity(user_name=user_name, user_username=user_username)
+    if not identity:
+        return "está ouvindo..."
+    return [RichTextUrl(text=identity, url=f"tg://user?id={int(user_id)}"), " está ouvindo..."]
 
 
 def _playcount_footer(track: dict[str, Any]) -> str | None:
@@ -76,7 +103,7 @@ def _playcount_footer(track: dict[str, Any]) -> str | None:
 
 def _footer_text(track: dict[str, Any], footer: str | None) -> str | None:
     if footer is not None:
-        value = _safe(footer, 160)
+        value = _plain(footer, 160)
         return value or None
     return _playcount_footer(track)
 
@@ -113,7 +140,7 @@ def music_caption_html(
         lines.append(f"<i>{_safe(lyric_status, 120)}</i>")
     resolved_footer = _footer_text(track, footer)
     if resolved_footer:
-        lines.append(resolved_footer)
+        lines.append(html.escape(resolved_footer))
     return "\n".join(lines)
 
 
@@ -128,49 +155,58 @@ def music_rich_message(
     lyric_status: str | None = None,
     footer: str | None = None,
 ) -> InputRichMessage:
-    title = _safe(track.get("track_name"))
-    artist = _safe(track.get("artist"))
-    track_url = _safe_url(track.get("spotify_url"))
-    title_part = f'<a href="{track_url}">{title}</a>' if track_url else title
-    listener = _listener_line(user_id=user_id, user_name=user_name, user_username=user_username)
+    title = _plain(track.get("track_name"))
+    artist = _plain(track.get("artist"))
+    track_url = _validated_url(track.get("spotify_url"))
+    title_text: Any = RichTextUrl(text=title, url=track_url) if track_url else title
 
-    # Layout: usuário → foto → música → artista/plays compactos
-    blocks = [
-        f"<h6>{listener}</h6>",
+    # Bot API 10.2 native Rich Message blocks. No HTML conversion is used here.
+    blocks: list[Any] = [
+        InputRichBlockSectionHeading(
+            text=_listener_rich_text(
+                user_id=user_id,
+                user_name=user_name,
+                user_username=user_username,
+            ),
+            size=6,
+        )
     ]
 
-    media: list[InputRichMessageMedia] | None = None
     if photo:
         rich_photo = BufferedInputFile(photo, filename="cover.jpg") if isinstance(photo, bytes) else photo
-        media = [InputRichMessageMedia(id="cover", media=InputMediaPhoto(media=rich_photo))]
-        blocks.append('<figure><img src="tg://photo?id=cover"/></figure>')
+        blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=rich_photo)))
 
-    blocks.append(f"<h1>{title_part}</h1>")
-    resolved_footer = _footer_text(track, footer)
+    blocks.append(InputRichBlockSectionHeading(text=title_text, size=1))
+    blocks.append(InputRichBlockSectionHeading(text=artist, size=6))
 
     if lyric:
-        blocks.append(f"<h6>{artist}</h6>")
         source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
         lyric_text = bound_excerpt_text(lyric.text) or ""
-        blocks.append(f"<blockquote>{html.escape(lyric_text)}<cite>{html.escape(lyric.label)}</cite></blockquote>")
         blocks.append(
-            f'<footer><a href="{html.escape(lyric.source_url, quote=True)}">{source_name}</a> · até 10 palavras</footer>'
+            InputRichBlockBlockQuotation(
+                blocks=[InputRichBlockParagraph(text=lyric_text)],
+                credit=_plain(lyric.label, 120),
+            )
         )
-        if resolved_footer:
-            blocks.append(f"<footer>{resolved_footer}</footer>")
+        blocks.append(
+            InputRichBlockFooter(
+                text=[RichTextUrl(text=source_name, url=lyric.source_url), " · até 10 palavras"]
+            )
+        )
     elif lyric_status:
-        blocks.append(f"<h6>{artist}</h6>")
-        blocks.append(f"<p><mark>{_safe(lyric_status, 120)}</mark></p>")
-        if resolved_footer:
-            blocks.append(f"<footer>{resolved_footer}</footer>")
-    elif resolved_footer:
-        # Artist + plays share one paragraph so Telegram does not add a full
-        # inter-block gap between them. <br> keeps the visual line break.
-        blocks.append(f"<p><b>{artist}</b><br>{resolved_footer}</p>")
-    else:
-        blocks.append(f"<h6>{artist}</h6>")
+        blocks.append(
+            InputRichBlockParagraph(
+                text=RichTextMarked(text=_plain(lyric_status, 120))
+            )
+        )
 
-    return InputRichMessage(html="\n".join(blocks), media=media, skip_entity_detection=True)
+    resolved_footer = _footer_text(track, footer)
+    if resolved_footer:
+        # Keep plays as Telegram's native footer so the original gray footer
+        # appearance is preserved instead of folding it into a paragraph.
+        blocks.append(InputRichBlockFooter(text=resolved_footer))
+
+    return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
 
 async def send_rich_text(message: Message, *, rich_html: str, fallback_html: str | None = None) -> Message:
