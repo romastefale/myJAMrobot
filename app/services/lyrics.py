@@ -15,7 +15,7 @@ from app.services.lyrics_cache import lyrics_snippet_cache_service
 logger = logging.getLogger(__name__)
 LRCLIB_API_URL = "https://lrclib.net/api"
 LYRICS_OVH_API_URL = "https://api.lyrics.ovh/v1"
-LRCLIB_USER_AGENT = "myJAMrobot/11.0 (short-excerpts)"
+LRCLIB_USER_AGENT = "myJAMrobot/11.0 (stanza-aware-excerpts)"
 LYRICS_TIMEOUT_SECONDS = 10.0
 MAX_RESPONSE_BYTES = 256 * 1024
 MAX_LYRICS_CHARS = 16_000
@@ -42,10 +42,6 @@ class LyricExcerpt:
     source_url: str
     selection_kind: str = "excerpt"
 
-    @property
-    def label(self) -> str:
-        return "Trecho de refrão" if self.selection_kind == "chorus" else "Trecho curto"
-
 
 def _clean_title(value: str) -> str:
     text = _VERSION_RE.sub("", str(value or "").strip())
@@ -68,11 +64,22 @@ def _line_key(value: str) -> str:
 def _limit_words(value: str, maximum: int = MAX_EXCERPT_WORDS) -> str | None:
     text = re.sub(r"[ \t]+", " ", str(value or "")).strip()
     matches = list(_WORD_RE.finditer(text))
-    if not matches:
+    if not matches or maximum <= 0:
         return None
     if len(matches) > maximum:
         text = text[: matches[maximum - 1].end()]
     return text.strip(" \n\t,;:—–-") or None
+
+
+def _stanza_word_ceiling(value: str) -> int:
+    """Derive the output ceiling from the selected stanza, bounded for public output."""
+    stanza_words = len(_WORD_RE.findall(str(value or "")))
+    return min(stanza_words, MAX_EXCERPT_WORDS) if stanza_words else 0
+
+
+def _limit_stanza(value: str) -> str | None:
+    ceiling = _stanza_word_ceiling(value)
+    return _limit_words(value, ceiling) if ceiling else None
 
 
 def bound_excerpt_text(value: str) -> str | None:
@@ -81,7 +88,7 @@ def bound_excerpt_text(value: str) -> str | None:
 
 
 def select_lyric_excerpt(lyrics: str) -> tuple[str | None, str]:
-    """Return a bounded excerpt and whether chorus evidence was found."""
+    """Return a stanza-aware bounded excerpt and its selection kind."""
     if not lyrics:
         return None, "excerpt"
     lines = [line.strip() for line in lyrics.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
@@ -98,7 +105,8 @@ def select_lyric_excerpt(lyrics: str) -> tuple[str | None, str]:
                 selected.append(candidate)
             elif selected:
                 break
-        excerpt = _limit_words("\n".join(selected))
+        stanza = "\n".join(selected)
+        excerpt = _limit_stanza(stanza)
         if excerpt:
             return excerpt, "chorus"
 
@@ -120,7 +128,8 @@ def select_lyric_excerpt(lyrics: str) -> tuple[str | None, str]:
     repeated = {key for key, count in stanza_counts.items() if count >= 2}
     if repeated:
         best_key = max(repeated, key=lambda key: (stanza_counts[key], len(key)))
-        return _limit_words("\n".join(stanzas[stanza_keys.index(best_key)])), "chorus"
+        stanza = "\n".join(stanzas[stanza_keys.index(best_key)])
+        return _limit_stanza(stanza), "chorus"
 
     line_counts = Counter(_line_key(line) for stanza in stanzas for line in stanza if _line_key(line))
     repeated_lines = {key for key, count in line_counts.items() if count >= 2}
@@ -128,11 +137,11 @@ def select_lyric_excerpt(lyrics: str) -> tuple[str | None, str]:
         hook = max(repeated_lines, key=lambda key: (line_counts[key], len(key)))
         for stanza in stanzas:
             if hook in {_line_key(line) for line in stanza}:
-                return _limit_words("\n".join(stanza)), "chorus"
+                return _limit_stanza("\n".join(stanza)), "chorus"
 
-    # Provider data sometimes omits section labels and repetitions. The first
-    # stanza is the deterministic low-confidence fallback, still only 10 words.
-    return _limit_words("\n".join(stanzas[0])), "excerpt"
+    # Provider data can omit section labels and repetitions. Keep a deterministic
+    # first-stanza fallback while deriving the printed ceiling from that stanza.
+    return _limit_stanza("\n".join(stanzas[0])), "excerpt"
 
 
 def extract_chorus_excerpt(lyrics: str) -> str | None:
