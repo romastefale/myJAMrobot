@@ -126,8 +126,7 @@ def music_caption_html(
     title_part = f'<a href="{track_url}"><b>{title}</b></a>' if track_url else f"<b>{title}</b>"
     lines = [
         _listener_line(user_id=user_id, user_name=user_name, user_username=user_username),
-        title_part,
-        f"<i>{artist}</i>",
+        f"{title_part} - <i>{artist}</i>",
     ]
     if lyric:
         lyric_text = bound_excerpt_text(lyric.text) or ""
@@ -174,11 +173,14 @@ def music_rich_message(
 
     blocks.append(
         InputRichBlockSectionHeading(
-            text=RichTextBold(text=title_text),
+            text=[
+                RichTextBold(text=title_text),
+                " - ",
+                RichTextItalic(text=artist),
+            ],
             size=3,
         )
     )
-    blocks.append(InputRichBlockParagraph(text=RichTextItalic(text=artist)))
 
     if lyric:
         lyric_text = bound_excerpt_text(lyric.text) or ""
