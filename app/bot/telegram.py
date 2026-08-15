@@ -96,7 +96,8 @@ def build_playing_payload(message: Message, track: dict[str, Any]) -> tuple[str,
     caption = music_caption_html(
         track,
         user_id=message.from_user.id,
-        user_name=message.from_user.full_name or "Usuário",
+        user_name=(message.from_user.full_name or "").strip(),
+        user_username=(message.from_user.username or "").strip(),
     )
     return track_id, caption
 
@@ -112,7 +113,8 @@ async def _send_playing(message: Message, track: dict[str, Any] | None = None) -
         chat_id=message.chat.id,
         track=track,
         user_id=message.from_user.id,
-        user_name=message.from_user.full_name or "Usuário",
+        user_name=(message.from_user.full_name or "").strip(),
+        user_username=(message.from_user.username or "").strip(),
     )
 
 
