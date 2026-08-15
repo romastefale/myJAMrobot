@@ -157,6 +157,32 @@ class LastfmService:
             logger.info("DEEZER_COVER_LOOKUP_FAILED")
         return None, 0, 0
 
+    async def _track_user_playcount(self, username: str, artist: str, title: str) -> int | None:
+        params = {
+            "method": "track.getInfo",
+            "username": username,
+            "artist": artist,
+            "track": title,
+            "api_key": LASTFM_API_KEY,
+            "format": "json",
+            "autocorrect": "1",
+        }
+        status, payload = await self._json_get(LASTFM_API_BASE_URL, params=params)
+        if status != 200 or not isinstance(payload, dict):
+            logger.info("LASTFM_TRACK_INFO_FAILED status=%s", status)
+            return None
+        track = payload.get("track")
+        if not isinstance(track, dict):
+            return None
+        raw = track.get("userplaycount")
+        if isinstance(raw, bool):
+            return None
+        try:
+            count = int(str(raw).strip())
+        except (TypeError, ValueError):
+            return None
+        return count if count >= 0 else None
+
     async def get_current_or_last_played(self, user_id: int) -> dict[str, Any] | None:
         username = await self.get_username(user_id)
         if not username or not LASTFM_API_KEY:
@@ -196,9 +222,10 @@ class LastfmService:
 
         from app.services.spotify import spotify_service
 
-        spotify_result, deezer_result = await asyncio.gather(
+        spotify_result, deezer_result, playcount_result = await asyncio.gather(
             spotify_service.search_track(artist, title),
             self._deezer_cover(artist, title),
+            self._track_user_playcount(username, artist, title),
             return_exceptions=True,
         )
         candidates: list[tuple[str, int, int]] = []
@@ -216,6 +243,11 @@ class LastfmService:
             deezer_cover = validate_media_url(deezer_result[0], kind="cover")
             if deezer_cover:
                 candidates.append((deezer_cover, deezer_result[1], deezer_result[2]))
+        user_playcount = (
+            playcount_result
+            if isinstance(playcount_result, int) and not isinstance(playcount_result, bool) and playcount_result >= 0
+            else None
+        )
         lastfm_cover = validate_media_url(lastfm_cover, kind="cover")
         if lastfm_cover:
             candidates.append((lastfm_cover, 300, 300))
@@ -238,6 +270,7 @@ class LastfmService:
             "cover_width": best_cover[1],
             "cover_height": best_cover[2],
             "preview_url": preview_url,
+            "user_playcount": user_playcount,
         }
 
 
