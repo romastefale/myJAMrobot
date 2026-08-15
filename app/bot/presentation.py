@@ -134,7 +134,7 @@ def music_rich_message(
     title_part = f'<a href="{track_url}">{title}</a>' if track_url else title
     listener = _listener_line(user_id=user_id, user_name=user_name, user_username=user_username)
 
-    # Layout: usuário → foto → música → artista → plays
+    # Layout: usuário → foto → música → artista/plays compactos
     blocks = [
         f"<h6>{listener}</h6>",
     ]
@@ -146,20 +146,30 @@ def music_rich_message(
         blocks.append('<figure><img src="tg://photo?id=cover"/></figure>')
 
     blocks.append(f"<h1>{title_part}</h1>")
-    blocks.append(f"<h6>{artist}</h6>")
+    resolved_footer = _footer_text(track, footer)
 
     if lyric:
+        blocks.append(f"<h6>{artist}</h6>")
         source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
         lyric_text = bound_excerpt_text(lyric.text) or ""
         blocks.append(f"<blockquote>{html.escape(lyric_text)}<cite>{html.escape(lyric.label)}</cite></blockquote>")
         blocks.append(
             f'<footer><a href="{html.escape(lyric.source_url, quote=True)}">{source_name}</a> · até 10 palavras</footer>'
         )
+        if resolved_footer:
+            blocks.append(f"<footer>{resolved_footer}</footer>")
     elif lyric_status:
+        blocks.append(f"<h6>{artist}</h6>")
         blocks.append(f"<p><mark>{_safe(lyric_status, 120)}</mark></p>")
-    resolved_footer = _footer_text(track, footer)
-    if resolved_footer:
-        blocks.append(f"<footer>{resolved_footer}</footer>")
+        if resolved_footer:
+            blocks.append(f"<footer>{resolved_footer}</footer>")
+    elif resolved_footer:
+        # Artist + plays share one paragraph so Telegram does not add a full
+        # inter-block gap between them. <br> keeps the visual line break.
+        blocks.append(f"<p><b>{artist}</b><br>{resolved_footer}</p>")
+    else:
+        blocks.append(f"<h6>{artist}</h6>")
+
     return InputRichMessage(html="\n".join(blocks), media=media, skip_entity_detection=True)
 
 
