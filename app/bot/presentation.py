@@ -49,22 +49,57 @@ def _safe_url(value: object) -> str | None:
     return html.escape(raw, quote=True)
 
 
+def _listener_line(*, user_id: int, user_name: str, user_username: str | None) -> str:
+    display_name = _safe(user_name, 100)
+    username = _safe(str(user_username or "").strip().lstrip("@"), 64)
+    if display_name:
+        identity = display_name
+    elif username:
+        identity = f"@{username}"
+    else:
+        return "está ouvindo..."
+    return f'<a href="tg://user?id={int(user_id)}">{identity}</a> está ouvindo...'
+
+
+def _playcount_footer(track: dict[str, Any]) -> str | None:
+    raw = track.get("user_playcount")
+    if isinstance(raw, bool):
+        return None
+    try:
+        count = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if count < 0:
+        return None
+    return f"♫ {count} plays"
+
+
+def _footer_text(track: dict[str, Any], footer: str | None) -> str | None:
+    if footer is not None:
+        value = _safe(footer, 160)
+        return value or None
+    return _playcount_footer(track)
+
+
 def music_caption_html(
     track: dict[str, Any],
     *,
     user_id: int,
     user_name: str,
+    user_username: str | None = None,
     lyric: LyricExcerpt | None = None,
     lyric_status: str | None = None,
-    footer: str = "Dados musicais: LAST FM",
+    footer: str | None = None,
 ) -> str:
     title = _safe(track.get("track_name"))
     artist = _safe(track.get("artist"))
     track_url = _safe_url(track.get("spotify_url"))
     title_part = f'<a href="{track_url}"><b>{title}</b></a>' if track_url else f"<b>{title}</b>"
-    user = _safe(user_name or "Usuário", 100)
-    user_link = f"tg://user?id={int(user_id)}"
-    lines = [f'<a href="{user_link}"><b>{user}</b></a>', f"{title_part} — <i>{artist}</i>"]
+    lines = [
+        _listener_line(user_id=user_id, user_name=user_name, user_username=user_username),
+        title_part,
+        f"<i>{artist}</i>",
+    ]
     if lyric:
         source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
         lyric_text = bound_excerpt_text(lyric.text) or ""
@@ -76,7 +111,9 @@ def music_caption_html(
         )
     elif lyric_status:
         lines.append(f"<i>{_safe(lyric_status, 120)}</i>")
-    lines.append(_safe(footer, 160))
+    resolved_footer = _footer_text(track, footer)
+    if resolved_footer:
+        lines.append(resolved_footer)
     return "\n".join(lines)
 
 
@@ -85,26 +122,27 @@ def music_rich_message(
     *,
     user_id: int,
     user_name: str,
+    user_username: str | None = None,
     photo: str | bytes | None,
     lyric: LyricExcerpt | None = None,
     lyric_status: str | None = None,
-    footer: str = "Dados musicais: LAST FM",
+    footer: str | None = None,
 ) -> InputRichMessage:
     title = _safe(track.get("track_name"))
     artist = _safe(track.get("artist"))
     track_url = _safe_url(track.get("spotify_url"))
-    title_part = f'<a href="{track_url}"><b>{title}</b></a>' if track_url else f"<b>{title}</b>"
-    user = _safe(user_name or "Usuário", 100)
+    title_part = f'<a href="{track_url}">{title}</a>' if track_url else title
+    listener = _listener_line(user_id=user_id, user_name=user_name, user_username=user_username)
     blocks = [
-        "<h2>playing</h2>",
-        f'<p><a href="tg://user?id={int(user_id)}"><b>{user}</b></a></p>',
+        f"<h6>{listener}</h6>",
+        f"<h1>{title_part}</h1>",
+        f"<h6>{artist}</h6>",
     ]
     media: list[InputRichMessageMedia] | None = None
     if photo:
         rich_photo = BufferedInputFile(photo, filename="cover.jpg") if isinstance(photo, bytes) else photo
         media = [InputRichMessageMedia(id="cover", media=InputMediaPhoto(media=rich_photo))]
         blocks.append('<figure><img src="tg://photo?id=cover"/></figure>')
-    blocks.append(f"<p>{title_part}<br><i>{artist}</i></p>")
     if lyric:
         source_name = "LRCLIB" if lyric.source == "lrclib" else "lyrics.ovh"
         lyric_text = bound_excerpt_text(lyric.text) or ""
@@ -114,7 +152,9 @@ def music_rich_message(
         )
     elif lyric_status:
         blocks.append(f"<p><mark>{_safe(lyric_status, 120)}</mark></p>")
-    blocks.append(f"<footer>{_safe(footer, 160)}</footer>")
+    resolved_footer = _footer_text(track, footer)
+    if resolved_footer:
+        blocks.append(f"<footer>{resolved_footer}</footer>")
     return InputRichMessage(html="\n".join(blocks), media=media, skip_entity_detection=True)
 
 
@@ -136,9 +176,10 @@ async def send_music_card(
     track: dict[str, Any],
     user_id: int,
     user_name: str,
+    user_username: str | None = None,
     lyric: LyricExcerpt | None = None,
     lyric_status: str | None = None,
-    footer: str = "Dados musicais: LAST FM",
+    footer: str | None = None,
 ) -> CardDelivery:
     track_id = str(track.get("track_id") or "").strip() or None
     cover_url = validate_media_url(track.get("album_image_url"), kind="cover")
@@ -152,6 +193,7 @@ async def send_music_card(
         track,
         user_id=user_id,
         user_name=user_name,
+        user_username=user_username,
         photo=photo,
         lyric=lyric,
         lyric_status=lyric_status,
@@ -167,6 +209,7 @@ async def send_music_card(
         track,
         user_id=user_id,
         user_name=user_name,
+        user_username=user_username,
         lyric=lyric,
         lyric_status=lyric_status,
         footer=footer,
@@ -188,17 +231,21 @@ async def edit_music_card(
     track: dict[str, Any],
     user_id: int,
     user_name: str,
+    user_username: str | None = None,
     lyric: LyricExcerpt | None,
     lyric_status: str | None,
+    footer: str | None = None,
 ) -> None:
     if delivery.mode == "rich":
         rich = music_rich_message(
             track,
             user_id=user_id,
             user_name=user_name,
+            user_username=user_username,
             photo=delivery.photo,
             lyric=lyric,
             lyric_status=lyric_status,
+            footer=footer,
         )
         try:
             await delivery.message.edit_text(text=None, rich_message=rich)
@@ -211,8 +258,10 @@ async def edit_music_card(
                 track,
                 user_id=user_id,
                 user_name=user_name,
+                user_username=user_username,
                 lyric=lyric,
                 lyric_status=lyric_status,
+                footer=footer,
             )
             await delivery.message.edit_text(caption, parse_mode="HTML", disable_web_page_preview=True)
         return
@@ -220,8 +269,10 @@ async def edit_music_card(
         track,
         user_id=user_id,
         user_name=user_name,
+        user_username=user_username,
         lyric=lyric,
         lyric_status=lyric_status,
+        footer=footer,
     )
     if delivery.mode == "photo":
         await delivery.message.edit_caption(caption=caption, parse_mode="HTML")
