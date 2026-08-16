@@ -392,9 +392,12 @@ async def build_playing_payload_for_user(
     else:
         play_prefix = "♫ "
     caption = (
-        f"<b><a href=\"{html.escape(user_link)}\">{display_name}</a></b>\n"
-        f"{play_prefix}<b>{track_part}</b> — <i>{artist}</i>"
-    )
+    f'<h6><a href="{user_link}">{display_name}</a></h6>'
+    f'<h3><b>{track_part}</b></h3>'
+    f'<h6><i>{artist}</i></h6>'
+    f'<footer>♫ {total_plays} plays</footer>'
+    )   
+    
     # Sprint 10: emoji vai pro 5º slot do tuple — callers usam pra
     # set_message_reaction depois de enviar o card.
     card_emoji = _pick_card_emoji(total_plays, plays_source)
