@@ -15,6 +15,7 @@ from aiogram.types import (
     Message,
     MessageReactionUpdated,
     ReactionTypeEmoji,
+    InputRichMessage,
 )
 
 from app.bot.intent import detect_intent
